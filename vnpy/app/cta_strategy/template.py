@@ -285,6 +285,12 @@ class CtaTemplate(ABC):
         """
         return self.cta_engine.get_pricetick(self)
 
+    def get_account(self, vt_accountid: str = ""):
+        """
+        查询账号的资金
+        """
+        return self.cta_engine.get_account(vt_accountid)
+
     def load_bar(
         self,
         days: int,

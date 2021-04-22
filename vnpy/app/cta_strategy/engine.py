@@ -536,6 +536,21 @@ class CtaEngine(BaseEngine):
         else:
             return None
 
+    def get_account(self, vt_accountid: str = ""):
+        """
+        查询账号的资金
+        """
+        if len(vt_accountid) > 0:
+            account = self.main_engine.get_account(vt_accountid)
+            return {'balance': account.balance, 'available': account.available, 'postion_ratio': round(account.frozen * 100 / (account.balance + 0.01), 2)}
+        else:
+            accounts = self.main_engine.get_all_accounts()
+            if len(accounts) > 0:
+                account = accounts[0]
+                return {'balance': account.balance, 'available': account.available, 'postion_ratio': round(account.frozen * 100 / (account.balance + 0.01), 2)}
+            else:
+                return {'balance': 0, 'available': 0, 'postion_ratio': 0}
+
     def load_bar(
         self,
         vt_symbol: str,

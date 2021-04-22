@@ -170,6 +170,12 @@ class BacktestingEngine:
         self.logs.clear()
         self.daily_results.clear()
 
+    def get_account(self, parameter_list):
+        """
+        返回账号的实时权益，可用资金，仓位比例,投资仓位比例上限
+        """
+        return {'balance': self.capital, 'available': self.capital, 'postion_ratio': 0}
+
     def set_parameters(
         self,
         vt_symbol: str,
