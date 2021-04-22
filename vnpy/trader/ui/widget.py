@@ -18,6 +18,7 @@ from vnpy.event import Event, EventEngine
 from ..constant import Direction, Exchange, Offset, OrderType
 from ..engine import MainEngine
 from ..event import (
+    EVENT_CONTRACT,
     EVENT_TICK,
     EVENT_TRADE,
     EVENT_ORDER,
@@ -601,6 +602,7 @@ class TradingWidget(QtWidgets.QWidget):
     """
 
     signal_tick = QtCore.pyqtSignal(Event)
+    contract_tick = QtCore.pyqtSignal(Event)
 
     def __init__(self, main_engine: MainEngine, event_engine: EventEngine):
         """"""
@@ -611,6 +613,8 @@ class TradingWidget(QtWidgets.QWidget):
 
         self.vt_symbol: str = ""
         self.price_digits: int = 0
+
+        self.contract_list = []
 
         self.init_ui()
         self.register_event()
@@ -764,6 +768,9 @@ class TradingWidget(QtWidgets.QWidget):
         self.signal_tick.connect(self.process_tick_event)
         self.event_engine.register(EVENT_TICK, self.signal_tick.emit)
 
+        self.contract_tick.connect(self.process_contract_event)
+        self.event_engine.register(EVENT_CONTRACT, self.contract_tick.emit)
+
     def process_tick_event(self, event: Event) -> None:
         """"""
         tick = event.data
@@ -805,6 +812,14 @@ class TradingWidget(QtWidgets.QWidget):
 
         if self.price_check.isChecked():
             self.price_line.setText(f"{tick.last_price:.{price_digits}f}")
+
+    def process_contract_event(self, event: Event) -> None:
+        contract = event.data
+        if contract:
+            self.contract_list.append(contract.vt_symbol)
+            completer = QtWidgets.QCompleter(self.contract_list)
+            self.symbol_line.setCompleter(completer)
+        pass
 
     def set_vt_symbol(self) -> None:
         """
