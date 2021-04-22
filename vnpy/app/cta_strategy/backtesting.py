@@ -15,7 +15,7 @@ from plotly.subplots import make_subplots
 from deap import creator, base, tools, algorithms
 
 from vnpy.trader.constant import (Direction, Offset, Exchange,
-                                  Interval, Status)
+                                  Interval, OrderType, Status)
 from vnpy.trader.database import database_manager
 from vnpy.trader.object import OrderData, TradeData, BarData, TickData
 from vnpy.trader.utility import round_to
@@ -995,7 +995,8 @@ class BacktestingEngine:
         volume: float,
         stop: bool,
         lock: bool,
-        net: bool
+        net: bool,
+        order_type: OrderType
     ):
         """"""
         price = round_to(price, self.pricetick)
