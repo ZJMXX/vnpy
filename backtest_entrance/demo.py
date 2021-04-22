@@ -1,6 +1,6 @@
 from vnpy.app.cta_strategy.backtesting import BacktestingEngine
 # from vnpy.app.cta_strategy.strategies.double_ma_strategy import DoubleMaStrategy
-from double_ma_strategy import DoubleMaStrategy
+from double_ma_strategy import DoubleMaStrategyTest
 from vnpy.trader.constant import Interval
 
 from datetime import datetime
@@ -16,7 +16,7 @@ engine.set_parameters(vt_symbol='XBTUSD.BITMEX',
                       pricetick=0.01,
                       capital=10000000)
 
-engine.add_strategy(DoubleMaStrategy, {})
+engine.add_strategy(DoubleMaStrategyTest, {})
 engine.load_data()
 engine.run_backtesting()
 engine.calculate_result()
