@@ -1,3 +1,4 @@
+from vnpy.trader.object import ContractData
 from vnpy.event import Event, EventEngine
 from vnpy.trader.engine import MainEngine
 from vnpy.trader.ui import QtCore, QtGui, QtWidgets
@@ -137,7 +138,7 @@ class CtaManager(QtWidgets.QWidget):
             return
 
         parameters = self.cta_engine.get_strategy_class_parameters(class_name)
-        editor = SettingEditor(parameters, class_name=class_name)
+        editor = SettingEditor(parameters, self.cta_engine, class_name=class_name)
         n = editor.exec_()
 
         if n == editor.Accepted:
@@ -272,7 +273,7 @@ class StrategyManager(QtWidgets.QFrame):
         strategy_name = self._data["strategy_name"]
 
         parameters = self.cta_engine.get_strategy_parameters(strategy_name)
-        editor = SettingEditor(parameters, strategy_name=strategy_name)
+        editor = SettingEditor(parameters, self.cta_engine, strategy_name=strategy_name)
         n = editor.exec_()
 
         if n == editor.Accepted:
@@ -397,7 +398,7 @@ class SettingEditor(QtWidgets.QDialog):
     """
 
     def __init__(
-        self, parameters: dict, strategy_name: str = "", class_name: str = ""
+        self, parameters: dict, cta_engine: CtaEngine, strategy_name: str = "", class_name: str = "",
     ):
         """"""
         super(SettingEditor, self).__init__()
@@ -405,6 +406,7 @@ class SettingEditor(QtWidgets.QDialog):
         self.parameters = parameters
         self.strategy_name = strategy_name
         self.class_name = class_name
+        self.cta_engine = cta_engine
 
         self.edits = {}
 
@@ -429,6 +431,16 @@ class SettingEditor(QtWidgets.QDialog):
             type_ = type(value)
 
             edit = QtWidgets.QLineEdit(str(value))
+
+            if name == "vt_symbol":
+                get_all_contracts = self.cta_engine.main_engine.get_all_contracts()
+                all_contracts = []
+                for contract in get_all_contracts:
+                    contract: ContractData = contract
+                    all_contracts.append(contract.vt_symbol)
+                completer = QtWidgets.QCompleter(all_contracts)
+                edit.setCompleter(completer)
+
             if type_ is int:
                 validator = QtGui.QIntValidator()
                 edit.setValidator(validator)
