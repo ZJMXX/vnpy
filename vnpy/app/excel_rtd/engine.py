@@ -13,8 +13,8 @@ APP_NAME = "ExcelRtd"
 
 EVENT_RTD_LOG = "eRtdLog"
 
-REP_ADDRESS = "tcp://*:9001"
-PUB_ADDRESS = "tcp://*:9002"
+REP_ADDRESS = "tcp://*:9003"
+PUB_ADDRESS = "tcp://*:9004"
 
 
 class RtdEngine(BaseEngine):
