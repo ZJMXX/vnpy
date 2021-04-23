@@ -135,6 +135,10 @@ class BacktestingEngine:
         self.stop_orders = {}
         self.active_stop_orders = {}
 
+        self.market_order_count = 0
+        self.market_orders = {}
+        self.active_market_orders = {}
+
         self.limit_order_count = 0
         self.limit_orders = {}
         self.active_limit_orders = {}
@@ -159,6 +163,10 @@ class BacktestingEngine:
         self.stop_order_count = 0
         self.stop_orders.clear()
         self.active_stop_orders.clear()
+
+        self.market_order_count = 0
+        self.market_orders.clear()
+        self.active_market_orders.clear()
 
         self.limit_order_count = 0
         self.limit_orders.clear()
@@ -792,6 +800,7 @@ class BacktestingEngine:
         self.bar = bar
         self.datetime = bar.datetime
 
+        self.cross_market_order()
         self.cross_limit_order()
         self.cross_stop_order()
         self.strategy.on_bar(bar)
@@ -803,11 +812,68 @@ class BacktestingEngine:
         self.tick = tick
         self.datetime = tick.datetime
 
+        self.cross_market_order()
         self.cross_limit_order()
         self.cross_stop_order()
         self.strategy.on_tick(tick)
 
         self.update_daily_close(tick.last_price)
+
+    def cross_market_order(self):
+        """
+        Cross limit order with last bar/tick data.
+        """
+        if self.mode == BacktestingMode.BAR:
+            long_cross_price = self.bar.low_price
+            short_cross_price = self.bar.high_price
+            long_best_price = self.bar.open_price
+            short_best_price = self.bar.open_price
+        else:
+            long_cross_price = self.tick.ask_price_1
+            short_cross_price = self.tick.bid_price_1
+            long_best_price = long_cross_price
+            short_best_price = short_cross_price
+
+        for order in list(self.active_market_orders.values()):
+            # Push order update with status "not traded" (pending).
+            if order.status == Status.SUBMITTING:
+                order.status = Status.NOTTRADED
+                self.strategy.on_order(order)
+
+            # Push order udpate with status "all traded" (filled).
+            order.traded = order.volume
+            order.status = Status.ALLTRADED
+            self.strategy.on_order(order)
+
+            self.active_market_orders.pop(order.vt_orderid)
+
+            # Push trade update
+            self.trade_count += 1
+
+            if order.direction == Direction.LONG:
+                trade_price = min(order.price, long_best_price)
+                pos_change = order.volume
+            else:
+                trade_price = max(order.price, short_best_price)
+                pos_change = -order.volume
+
+            trade = TradeData(
+                symbol=order.symbol,
+                exchange=order.exchange,
+                orderid=order.orderid,
+                tradeid=str(self.trade_count),
+                direction=order.direction,
+                offset=order.offset,
+                price=trade_price,
+                volume=order.volume,
+                datetime=self.datetime,
+                gateway_name=self.gateway_name,
+            )
+
+            self.strategy.pos += pos_change
+            self.strategy.on_trade(trade)
+
+            self.trades[trade.vt_tradeid] = trade
 
     def cross_limit_order(self):
         """
@@ -1002,6 +1068,8 @@ class BacktestingEngine:
         price = round_to(price, self.pricetick)
         if stop:
             vt_orderid = self.send_stop_order(direction, offset, price, volume)
+        elif order_type == OrderType.MARKET:
+            vt_orderid = self.send_market_order(direction, offset, price, volume)
         else:
             vt_orderid = self.send_limit_order(direction, offset, price, volume)
         return [vt_orderid]
@@ -1030,6 +1098,34 @@ class BacktestingEngine:
         self.stop_orders[stop_order.stop_orderid] = stop_order
 
         return stop_order.stop_orderid
+
+    def send_market_order(
+            self,
+            direction: Direction,
+            offset: Offset,
+            price: float,
+            volume: float
+    ):
+        """"""
+        self.market_order_count += 1
+
+        order = OrderData(
+            symbol=self.symbol,
+            exchange=self.exchange,
+            orderid=str(self.market_order_count),
+            direction=direction,
+            offset=offset,
+            price=price,
+            volume=volume,
+            status=Status.SUBMITTING,
+            gateway_name=self.gateway_name,
+            datetime=self.datetime
+        )
+
+        self.active_market_orders[order.vt_orderid] = order
+        self.market_orders[order.vt_orderid] = order
+
+        return order.vt_orderid
 
     def send_limit_order(
         self,
