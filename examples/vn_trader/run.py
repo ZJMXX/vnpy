@@ -26,7 +26,7 @@ from vnpy.trader.ui import MainWindow, create_qapp
 # from vnpy.gateway.da import DaGateway
 # from vnpy.gateway.mt5 import Mt5Gateway
 # from vnpy.gateway.binance import BinanceGateway
-# from vnpy.gateway.binances import BinancesGateway
+from vnpy.gateway.binances import BinancesGateway
 # from vnpy.gateway.huobi import HuobiGateway
 # from vnpy.gateway.huobif import HuobifGateway
 # from vnpy.gateway.huobis import HuobisGateway
@@ -95,7 +95,7 @@ def main():
     # main_engine.add_gateway(DaGateway)
     # main_engine.add_gateway(Mt5Gateway)
     # main_engine.add_gateway(BinanceGateway)
-    # main_engine.add_gateway(BinancesGateway)    
+    main_engine.add_gateway(BinancesGateway)
     # main_engine.add_gateway(HuobiGateway)
     # main_engine.add_gateway(HuobifGateway)
     # main_engine.add_gateway(HuobisGateway)    
