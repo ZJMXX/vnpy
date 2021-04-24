@@ -86,6 +86,8 @@ class BaseGateway(ABC):
         self.event_engine: EventEngine = event_engine
         self.gateway_name: str = gateway_name
 
+        self.status = {'name': gateway_name, 'con': False}
+
     def on_event(self, type: str, data: Any = None) -> None:
         """
         General event push.
