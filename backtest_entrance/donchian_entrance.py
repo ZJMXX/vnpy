@@ -7,11 +7,11 @@ from datetime import datetime
 engine = BacktestingEngine()
 engine.set_parameters(vt_symbol='BTCUSDT.BYBIT',
                       interval=Interval.MINUTE.value,
-                      start=datetime(2021, 1, 20),
+                      start=datetime(2020, 7, 1),
                       end=datetime(2021, 4, 23),
                       rate=0.000025,
                       slippage=0.2,
-                      size=1,
+                      size=5,
                       pricetick=0.01,
                       capital=1000000)
 

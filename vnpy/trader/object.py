@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from logging import INFO
 
-from .constant import Direction, Exchange, Interval, Offset, Status, Product, OptionType, OrderType
+from .constant import BinanceContractType, Direction, Exchange, Interval, Offset, Status, Product, OptionType, OrderType
 
 ACTIVE_STATUSES = set([Status.SUBMITTING, Status.NOTTRADED, Status.PARTTRADED])
 
@@ -70,6 +70,38 @@ class TickData(BaseData):
     ask_volume_3: float = 0
     ask_volume_4: float = 0
     ask_volume_5: float = 0
+
+    def __post_init__(self):
+        """"""
+        self.vt_symbol = f"{self.symbol}.{self.exchange.value}"
+
+
+@dataclass
+class ContractData(BaseData):
+    """
+    Contract data contains basic information about each contract traded.
+    """
+
+    symbol: str
+    exchange: Exchange
+    name: str
+    product: Product
+    size: float
+    pricetick: float
+    margin_rate: float = 0.1  # 保证金比率
+
+    min_volume: float = 1  # minimum trading volume of the contract
+    stop_supported: bool = False  # whether server supports stop order
+    net_position: bool = False  # whether gateway uses net position volume
+    history_data: bool = False  # whether gateway provides bar history data
+    market_supported: bool = False  # whether gateway supports market order
+
+    option_strike: float = 0
+    option_underlying: str = ""  # vt_symbol of underlying contract
+    option_type: OptionType = None
+    option_expiry: datetime = None
+    option_portfolio: str = ""
+    option_index: str = ""  # for identifying options with same strike price
 
     def __post_init__(self):
         """"""
@@ -142,6 +174,15 @@ class OrderData(BaseData):
             orderid=self.orderid, symbol=self.symbol, exchange=self.exchange
         )
         return req
+
+
+@dataclass
+class BinanceContractData(ContractData):
+    # 合约类型
+    contract_type: BinanceContractType = None
+
+    # 保证金币种
+    margin_asset: str = ""
 
 
 @dataclass
@@ -236,17 +277,17 @@ class ContractData(BaseData):
     size: float
     pricetick: float
 
-    min_volume: float = 1           # minimum trading volume of the contract
-    stop_supported: bool = False    # whether server supports stop order
-    net_position: bool = False      # whether gateway uses net position volume
-    history_data: bool = False      # whether gateway provides bar history data
+    min_volume: float = 1  # minimum trading volume of the contract
+    stop_supported: bool = False  # whether server supports stop order
+    net_position: bool = False  # whether gateway uses net position volume
+    history_data: bool = False  # whether gateway provides bar history data
 
     option_strike: float = 0
-    option_underlying: str = ""     # vt_symbol of underlying contract
+    option_underlying: str = ""  # vt_symbol of underlying contract
     option_type: OptionType = None
     option_expiry: datetime = None
     option_portfolio: str = ""
-    option_index: str = ""          # for identifying options with same strike price
+    option_index: str = ""  # for identifying options with same strike price
 
     def __post_init__(self):
         """"""

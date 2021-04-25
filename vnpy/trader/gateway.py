@@ -88,6 +88,8 @@ class BaseGateway(ABC):
 
         self.status = {'name': gateway_name, 'con': False}
 
+        self.query_functions = []
+
     def on_event(self, type: str, data: Any = None) -> None:
         """
         General event push.
