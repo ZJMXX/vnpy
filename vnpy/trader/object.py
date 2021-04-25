@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from logging import INFO
 
-from .constant import Direction, Exchange, Interval, Offset, Status, Product, OptionType, OrderType
+from .constant import BinanceContractType, Direction, Exchange, Interval, Offset, Status, Product, OptionType, OrderType
 
 ACTIVE_STATUSES = set([Status.SUBMITTING, Status.NOTTRADED, Status.PARTTRADED])
 
@@ -116,14 +116,34 @@ class OrderData(BaseData):
     price: float = 0
     volume: float = 0
     traded: float = 0
+    fee: float = 0
+    netpnl: float = 0
     status: Status = Status.SUBMITTING
     datetime: datetime = None
+    date: str = ""
+    time: str = ""
+    cancel_time: str = ""
     reference: str = ""
 
     def __post_init__(self):
         """"""
         self.vt_symbol = f"{self.symbol}.{self.exchange.value}"
         self.vt_orderid = f"{self.gateway_name}.{self.orderid}"
+
+        self.untraded = self.volume - self.traded
+
+        # With millisecond
+        if self.date and "." in self.time:
+            if "-" in self.date:
+                self.datetime = datetime.strptime(" ".join([self.date, self.time]), "%Y-%m-%d %H:%M:%S.%f")
+            else:
+                self.datetime = datetime.strptime(" ".join([self.date, self.time]), "%Y%m%d %H:%M:%S.%f")
+        # Without millisecond
+        elif self.date:
+            if "-" in self.date:
+                self.datetime = datetime.strptime(" ".join([self.date, self.time]), "%Y-%m-%d %H:%M:%S")
+            else:
+                self.datetime = datetime.strptime(" ".join([self.date, self.time]), "%Y%m%d %H:%M:%S")
 
     def is_active(self) -> bool:
         """
@@ -235,11 +255,13 @@ class ContractData(BaseData):
     product: Product
     size: float
     pricetick: float
+    margin_rate: float = 0.1  # 保证金比率
 
     min_volume: float = 1           # minimum trading volume of the contract
     stop_supported: bool = False    # whether server supports stop order
     net_position: bool = False      # whether gateway uses net position volume
     history_data: bool = False      # whether gateway provides bar history data
+    market_supported: bool = False  # whether gateway supports market order
 
     option_strike: float = 0
     option_underlying: str = ""     # vt_symbol of underlying contract
@@ -287,6 +309,15 @@ class QuoteData(BaseData):
             orderid=self.quoteid, symbol=self.symbol, exchange=self.exchange
         )
         return req
+
+
+@dataclass
+class BinanceContractData(ContractData):
+    # 合约类型
+    contract_type: BinanceContractType = None
+
+    # 保证金币种
+    margin_asset: str = ""
 
 
 @dataclass

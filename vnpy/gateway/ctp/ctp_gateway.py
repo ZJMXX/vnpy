@@ -618,8 +618,12 @@ class CtpTdApi(TdApi):
                 product=product,
                 size=data["VolumeMultiple"],
                 pricetick=data["PriceTick"],
-                gateway_name=self.gateway_name
+                gateway_name=self.gateway_name,
+                market_supported=True
             )
+
+            if contract.exchange == Exchange.SHFE:
+                contract.market_supported = False
 
             # For option only
             if contract.product == Product.OPTION:

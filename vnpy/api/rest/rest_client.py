@@ -6,6 +6,7 @@ from multiprocessing.dummy import Pool
 from queue import Empty, Queue
 from typing import Any, Callable, Optional, Union, Type
 from types import TracebackType
+from socket import error as SocketError
 
 import requests
 
@@ -278,6 +279,14 @@ class RestClient(object):
                     request.on_failed(status_code, request)
                 else:
                     self.on_failed(status_code, request)
+        except requests.exceptions.ConnectionError:
+            pass
+        except ConnectionResetError:
+            pass
+        except ConnectionAbortedError:
+            pass
+        except SocketError:
+            pass
         except Exception:
             request.status = RequestStatus.error
             t, v, tb = sys.exc_info()

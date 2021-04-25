@@ -13,12 +13,14 @@ from threading import Lock
 from typing import Dict, List, Tuple
 from vnpy.trader.utility import round_to
 import pytz
+import requests
 
 from requests.exceptions import SSLError
 
 from vnpy.api.rest import RestClient, Request
 from vnpy.api.websocket import WebsocketClient
 from vnpy.trader.constant import (
+    BinanceContractType,
     Direction,
     Exchange,
     Product,
@@ -33,6 +35,7 @@ from vnpy.trader.object import (
     OrderData,
     TradeData,
     AccountData,
+    BinanceContractData,
     ContractData,
     PositionData,
     BarData,
@@ -77,11 +80,23 @@ ORDERTYPE_VT2BINANCES: Dict[OrderType, Tuple[str, str]] = {
 }
 ORDERTYPE_BINANCES2VT: Dict[Tuple[str, str], OrderType] = {v: k for k, v in ORDERTYPE_VT2BINANCES.items()}
 
+SIDE_VT2BINANCEF: Dict[Direction, str] = {
+    Direction.LONG: "LONG",
+    Direction.SHORT: "SHORT"
+}
+SIDE_BINACES2VT: Dict[str, Direction] = {v: k for k, v in SIDE_VT2BINANCEF.items()}
+
 DIRECTION_VT2BINANCES: Dict[Direction, str] = {
     Direction.LONG: "BUY",
     Direction.SHORT: "SELL"
 }
 DIRECTION_BINANCES2VT: Dict[str, Direction] = {v: k for k, v in DIRECTION_VT2BINANCES.items()}
+
+OFFSET_VT2BINANCES: Dict[Offset, bool] = {
+    Offset.OPEN: False,
+    Offset.CLOSE: True
+}
+OFFSET_BINANCES2VT: Dict[bool, Offset] = {v: k for k, v in OFFSET_VT2BINANCES.items()}
 
 INTERVAL_VT2BINANCES: Dict[Interval, str] = {
     Interval.MINUTE: "1m",
@@ -95,6 +110,19 @@ TIMEDELTA_MAP: Dict[Interval, timedelta] = {
     Interval.DAILY: timedelta(days=1),
 }
 
+ContractType_VT2BINANCES: Dict[BinanceContractType, str] = {
+    BinanceContractType.PERPETUAL : "PERPETUAL",
+    BinanceContractType.CURRENT_MONTH  : "CURRENT_MONTH",
+    BinanceContractType.NEXT_MONTH : "NEXT_MONTH",
+    BinanceContractType.CURRENT_QUARTER : "CURRENT_QUARTER",
+    BinanceContractType.NEXT_QUARTER : "NEXT_QUARTER",
+    BinanceContractType.CURRENT_QUARTER_DELIVERING : "CURRENT_QUARTER DELIVERING",
+    BinanceContractType.NEXT_QUARTER_DELIVERING : "NEXT_QUARTER DELIVERING",
+    BinanceContractType.CURRENT_MONTH_DELIVERING : "CURRENT_MONTH DELIVERING",
+    BinanceContractType.NEXT_MONTH_DELIVERING : "NEXT_MONTH DELIVERING"
+}
+ContractType_BINANCES2VT: Dict[str, BinanceContractType] = {v: k for k, v in ContractType_VT2BINANCES.items()}
+
 CHINA_TZ = pytz.timezone("Asia/Shanghai")
 
 
@@ -105,7 +133,9 @@ class Security(Enum):
 
 
 symbol_name_map: Dict[str, str] = {}
-symbol_contract_map: Dict[str, ContractData] = {}
+contract_type_map: Dict[str, BinanceContractType] = {}
+margin_asset_map: Dict[str, str] = {}
+last_price_map: Dict[str, float] = {}
 
 
 class BinancesGateway(BaseGateway):
@@ -210,10 +240,16 @@ class BinancesRestApi(RestClient):
         self.recv_window: int = 5000
         self.time_offset: int = 0
 
+        self.contracts = {}
+
         self.order_count: int = 1_000_000
         self.order_count_lock: Lock = Lock()
         self.connect_time: int = 0
         self.usdt_base: bool = False
+        self.cache_position_symbols = {}
+        self.accountid = ""
+
+        self.dualSidePosition = False
 
     def sign(self, request: Request) -> Request:
         """
@@ -265,14 +301,14 @@ class BinancesRestApi(RestClient):
         return request
 
     def connect(
-        self,
-        usdt_base: bool,
-        key: str,
-        secret: str,
-        session_number: int,
-        server: str,
-        proxy_host: str,
-        proxy_port: int
+            self,
+            usdt_base: bool,
+            key: str,
+            secret: str,
+            session_number: int,
+            server: str,
+            proxy_host: str,
+            proxy_port: int
     ) -> None:
         """
         Initialize connection to REST server.
@@ -283,9 +319,11 @@ class BinancesRestApi(RestClient):
         self.proxy_port = proxy_port
         self.proxy_host = proxy_host
         self.server = server
+        self.pairs: list = []
+        self.trade_symbol: list = []
 
         self.connect_time = (
-            int(datetime.now().strftime("%y%m%d%H%M%S")) * self.order_count
+                int(datetime.now().strftime("%y%m%d%H%M%S")) * self.order_count
         )
 
         if self.server == "REAL":
@@ -302,13 +340,18 @@ class BinancesRestApi(RestClient):
         self.start(session_number)
 
         self.gateway.write_log("REST API启动成功")
+        self.gateway.status.update({'td_con': True, 'td_con_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')})
+        if self.gateway.status.get('md_con', False):
+            self.gateway.status.update({'con': True})
 
         self.query_time()
         self.query_account()
+        self.query_contract()
         self.query_position()
         self.query_order()
-        self.query_contract()
+        # self.query_trade()
         self.start_user_stream()
+        self.query_dual()
 
     def query_time(self) -> Request:
         """"""
@@ -343,6 +386,43 @@ class BinancesRestApi(RestClient):
             callback=self.on_query_account,
             data=data
         )
+
+    def query_dual(self):
+        """
+        查询持仓方向
+        """
+        data = {"security": Security.SIGNED}
+
+        if self.usdt_base:
+            path = "/fapi/v1/positionSide/dual"
+        else:
+            path = "/dapi/v1/positionSide/dual"
+
+        params = {
+            "recvWindow": 200000
+        }
+
+        resp = self.request(
+            method="GET",
+            path=path,
+            data=data,
+            params=params
+        )
+        if isinstance(resp, requests.Response):
+            if resp.status_code // 100 != 2:
+                msg = f"查询持仓方向失败，状态码：{resp.status_code}，信息：{resp.text}"
+                self.gateway.write_log(msg)
+            else:
+                data = resp.json()
+                if data['dualSidePosition']:
+                    self.dualSidePosition = True
+        else:
+            msg = f"查询持仓方向失败，委托下单失败"
+            self.gateway.write_log(msg)
+            time.sleep(3)
+            self.query_dual()
+
+        pass
 
     def query_position(self) -> Request:
         """"""
@@ -391,6 +471,7 @@ class BinancesRestApi(RestClient):
             method="GET",
             path=path,
             callback=self.on_query_contract,
+            on_error=self.on_default_error,
             data=data
         )
 
@@ -475,6 +556,16 @@ class BinancesRestApi(RestClient):
             extra=req
         )
 
+    def on_default_error(
+            self, exception_type: type, exception_value: Exception, tb, request: Request
+    ):
+        """
+        Callback when cancelling order failed on server.
+        """
+        # Record exception if not ConnectionError
+        if not issubclass(exception_type, ConnectionError) and not issubclass(exception_type, ConnectionResetError):
+            self.on_error(exception_type, exception_value, tb, request)
+
     def start_user_stream(self) -> Request:
         """"""
         data = {
@@ -544,26 +635,36 @@ class BinancesRestApi(RestClient):
     def on_query_position(self, data: dict, request: Request) -> None:
         """"""
         for d in data:
+            if d['positionSide'] == "BOTH":
+                direction = Direction.LONG if float(d["positionAmt"]) > 0 else Direction.SHORT
+            else:
+                direction = SIDE_BINACES2VT[d["positionSide"]]
             position = PositionData(
                 symbol=d["symbol"],
                 exchange=Exchange.BINANCE,
-                direction=Direction.NET,
+                direction=direction,
                 volume=float(d["positionAmt"]),
                 price=float(d["entryPrice"]),
                 pnl=float(d["unRealizedProfit"]),
                 gateway_name=self.gateway_name,
             )
 
-            if position.volume:
-                volume = d["positionAmt"]
-                if '.' in volume:
-                    position.volume = float(d["positionAmt"])
-                else:
-                    position.volume = int(d["positionAmt"])
+            if position.direction not in [Direction.LONG, Direction.SHORT]:
+                continue
 
-                self.gateway.on_position(position)
+            # 如果持仓数量为0，且不在之前缓存过的合约信息中，不做on_position
+            key = position.symbol + position.direction.value
+            if position.volume == 0:
+                if key not in self.cache_position_symbols:
+                    continue
+            else:
+                if key not in self.cache_position_symbols:
+                    self.cache_position_symbols.update({key: position.volume})
 
-        self.gateway.write_log("持仓信息查询成功")
+            if margin_asset_map[position.symbol] != "USDT" and position.symbol in last_price_map.keys():
+                position.pnl = position.pnl * last_price_map[position.symbol]
+
+            self.gateway.on_position(position)
 
     def on_query_order(self, data: dict, request: Request) -> None:
         """"""
@@ -599,6 +700,7 @@ class BinancesRestApi(RestClient):
 
             pricetick = 1
             min_volume = 1
+            symbol = d["symbol"]
 
             for f in d["filters"]:
                 if f["filterType"] == "PRICE_FILTER":
@@ -606,21 +708,36 @@ class BinancesRestApi(RestClient):
                 elif f["filterType"] == "LOT_SIZE":
                     min_volume = float(f["stepSize"])
 
-            contract = ContractData(
-                symbol=d["symbol"],
+            # 合约乘数
+            symbol_size = 20  # 缺省为20倍的杠杆
+            contract_info = self.contracts.get(symbol, {})
+            if contract_info:
+                symbol_size = int(contract_info.get('leverage', symbol_size))
+
+            contract_type = d['contractType']
+
+            contract = BinanceContractData(
+                symbol=symbol,
                 exchange=Exchange.BINANCE,
                 name=name,
                 pricetick=pricetick,
-                size=1,
+                size=symbol_size,
                 min_volume=min_volume,
+                margin_rate=1,
                 product=Product.FUTURES,
-                net_position=True,
                 history_data=True,
                 gateway_name=self.gateway_name,
+                stop_supported=True,
+                market_supported=True,
+                margin_asset=d['marginAsset']
             )
+            if contract_type:
+                contract.contract_type = ContractType_BINANCES2VT[contract_type]
             self.gateway.on_contract(contract)
 
-            symbol_contract_map[contract.symbol] = contract
+            symbol_name_map[contract.symbol] = contract.name
+            contract_type_map[contract.symbol] = contract.contract_type
+            margin_asset_map[contract.symbol] = contract.margin_asset
 
         self.gateway.write_log("合约信息查询成功")
 
@@ -640,7 +757,7 @@ class BinancesRestApi(RestClient):
         self.gateway.write_log(msg)
 
     def on_send_order_error(
-        self, exception_type: type, exception_value: Exception, tb, request: Request
+            self, exception_type: type, exception_value: Exception, tb, request: Request
     ) -> None:
         """
         Callback when sending order caused exception.
@@ -680,8 +797,8 @@ class BinancesRestApi(RestClient):
     def query_history(self, req: HistoryRequest) -> List[BarData]:
         """"""
         history = []
-        limit = 1500
-        end_time = int(datetime.timestamp(req.end))
+        limit = 1000
+        start_time = int(datetime.timestamp(req.start))
 
         while True:
             # Create query params
@@ -689,19 +806,41 @@ class BinancesRestApi(RestClient):
                 "symbol": req.symbol,
                 "interval": INTERVAL_VT2BINANCES[req.interval],
                 "limit": limit,
-                "endTime": end_time * 1000,         # convert to millisecond
+                "startTime": start_time * 1000,  # convert to millisecond
             }
 
             # Add end time if specified
-            if req.start:
-                start_time = int(datetime.timestamp(req.start))
-                params["startTime"] = start_time * 1000     # convert to millisecond
+            if req.end:
+                end_time = int(datetime.timestamp(req.end))
+                if start_time > end_time:
+                    break
+                params["endTime"] = end_time * 1000  # convert to millisecond
 
             # Get response from server
             if self.usdt_base:
                 path = "/fapi/v1/klines"
             else:
                 path = "/dapi/v1/klines"
+
+            contract_type = contract_type_map[req.symbol]
+            if contract_type == BinanceContractType.CURRENT_QUARTER:
+                path = "/dapi/v1/continuousKlines"
+                params['contractType'] = "CURRENT_QUARTER"
+                params.pop("symbol", None)
+                symbol = req.symbol.split("_")[0]
+                params['pair'] = symbol
+                params['endTime'] = params.pop("startTime")
+
+            elif contract_type == BinanceContractType.NEXT_QUARTER:
+                path = "/dapi/v1/continuousKlines"
+                params['contractType'] = "NEXT_QUARTER"
+                params.pop("symbol", None)
+                symbol = req.symbol.split("_")[0]
+                params['pair'] = symbol
+                params['endTime'] = params.pop("startTime")
+
+            elif not self.usdt_base:
+                params['endTime'] = params.pop("startTime")
 
             resp = self.request(
                 "GET",
@@ -710,49 +849,75 @@ class BinancesRestApi(RestClient):
                 params=params
             )
 
-            # Break if request failed with other status code
-            if resp.status_code // 100 != 2:
-                msg = f"获取历史数据失败，状态码：{resp.status_code}，信息：{resp.text}"
-                self.gateway.write_log(msg)
-                break
-            else:
-                data = resp.json()
-                if not data:
-                    msg = f"获取历史数据为空，开始时间：{start_time}"
+            if isinstance(resp, requests.Response):
+                # Break if request failed with other status code
+                if resp.status_code // 100 != 2:
+                    msg = f"获取历史数据失败，状态码：{resp.status_code}，信息：{resp.text}"
                     self.gateway.write_log(msg)
                     break
+                else:
+                    data = resp.json()
+                    if not data:
+                        msg = f"获取历史数据为空，开始时间：{start_time}"
+                        self.gateway.write_log(msg)
+                        break
 
-                buf = []
+                    buf = []
+                    end_timestamp = 0
 
-                for l in data:
-                    bar = BarData(
-                        symbol=req.symbol,
-                        exchange=req.exchange,
-                        datetime=generate_datetime(l[0]),
-                        interval=req.interval,
-                        volume=float(l[5]),
-                        open_price=float(l[1]),
-                        high_price=float(l[2]),
-                        low_price=float(l[3]),
-                        close_price=float(l[4]),
-                        gateway_name=self.gateway_name
-                    )
-                    buf.append(bar)
+                    for i in data:
+                        bar = BarData(
+                            symbol=req.symbol,
+                            exchange=req.exchange,
+                            datetime=generate_datetime(i[0]),
+                            interval=req.interval,
+                            volume=float(i[5]),
+                            open_price=float(i[1]),
+                            high_price=float(i[2]),
+                            low_price=float(i[3]),
+                            close_price=float(i[4]),
+                            gateway_name=self.gateway_name
+                        )
+                        buf.append(bar)
+                        end_timestamp = i[0]
 
-                history.extend(buf)
+                    history.extend(buf)
 
-                begin = buf[0].datetime
-                end = buf[-1].datetime
-                msg = f"获取历史数据成功，{req.symbol} - {req.interval.value}，{begin} - {end}"
-                self.gateway.write_log(msg)
+                    begin = buf[0].datetime
+                    end = buf[-1].datetime
+                    msg = f"获取历史数据成功，{req.symbol} - {req.interval.value}，{begin} - {end}"
+                    self.gateway.write_log(msg)
 
-                # Break if total data count less than limit (latest date collected)
-                if len(data) < limit:
-                    break
+                    # Break if total data count less than limit (latest date collected)
+                    if len(data) < limit:
+                        break
 
-                # Update start time
-                end_dt = begin - TIMEDELTA_MAP[req.interval]
-                end_time = int(datetime.timestamp(end_dt))
+                    # Update start time
+                    bar = buf[-1]
+                    # start_dt = bar.datetime + TIMEDELTA_MAP[req.interval]
+                    # start_time = int(datetime.timestamp(start_dt))
+                    time_delta_stamp = 60
+                    if req.interval == Interval.HOUR:
+                        time_delta_stamp = 60 * 60
+                    elif req.interval == Interval.DAILY:
+                        time_delta_stamp = 60 * 60 * 24
+
+                    start_time = int(end_timestamp / 1000) + time_delta_stamp
+                    if contract_type == BinanceContractType.NEXT_QUARTER or contract_type == BinanceContractType.CURRENT_QUARTER or not self.usdt_base:
+                        if int(datetime.timestamp(req.end)) - start_time > time_delta_stamp * 999:
+                            start_time += time_delta_stamp * 999
+                        else:
+                            limit = int((int(datetime.timestamp(req.end)) - start_time) / time_delta_stamp)
+                            start_time += int(datetime.timestamp(req.end)) - start_time - time_delta_stamp
+                            if limit == 0:
+                                break
+                            else:
+                                limit += 20
+                    if start_time > int(datetime.timestamp(req.end)):
+                        print("开始时间大于结束时间")
+                        break
+            else:
+                pass
 
         return history
 
@@ -823,6 +988,8 @@ class BinancesTradeWebsocketApi(WebsocketClient):
         if not order_type:
             return
 
+        dt = generate_datetime(packet["E"])
+
         order = OrderData(
             symbol=ord_data["s"],
             exchange=Exchange.BINANCE,
@@ -833,23 +1000,23 @@ class BinancesTradeWebsocketApi(WebsocketClient):
             volume=float(ord_data["q"]),
             traded=float(ord_data["z"]),
             status=STATUS_BINANCES2VT[ord_data["X"]],
-            datetime=generate_datetime(packet["E"]),
-            gateway_name=self.gateway_name
+            datetime=dt,
+            gateway_name=self.gateway_name,
+            offset=OFFSET_BINANCES2VT[ord_data['R']],
+            time=dt.time()
         )
+
+        if "n" in ord_data.keys():
+            order.fee = float(ord_data['n'])
+            order.netpnl = float(ord_data['rp'])
 
         self.gateway.on_order(order)
 
-        # Round trade volume to minimum trading volume
+        # Push trade event
         trade_volume = float(ord_data["l"])
-
-        contract = symbol_contract_map.get(order.symbol, None)
-        if contract:
-            trade_volume = round_to(trade_volume, contract.min_volume)
-
         if not trade_volume:
             return
 
-        # Push trade event
         trade = TradeData(
             symbol=order.symbol,
             exchange=order.exchange,
@@ -860,6 +1027,7 @@ class BinancesTradeWebsocketApi(WebsocketClient):
             volume=trade_volume,
             datetime=generate_datetime(ord_data["T"]),
             gateway_name=self.gateway_name,
+            offset=order.offset
         )
         self.gateway.on_trade(trade)
 
@@ -875,14 +1043,15 @@ class BinancesDataWebsocketApi(WebsocketClient):
         self.gateway_name: str = gateway.gateway_name
 
         self.ticks: Dict[str, TickData] = {}
+        self.bars: Dict[str, BarData] = {}
         self.usdt_base = False
 
     def connect(
-        self,
-        usdt_base: bool,
-        proxy_host: str,
-        proxy_port: int,
-        server: str
+            self,
+            usdt_base: bool,
+            proxy_host: str,
+            proxy_port: int,
+            server: str
     ) -> None:
         """"""
         self.usdt_base = usdt_base
@@ -896,19 +1065,28 @@ class BinancesDataWebsocketApi(WebsocketClient):
 
     def subscribe(self, req: SubscribeRequest) -> None:
         """"""
-        if req.symbol not in symbol_contract_map:
+        if req.symbol not in symbol_name_map:
             self.gateway.write_log(f"找不到该合约代码{req.symbol}")
             return
 
         # Create tick buf data
         tick = TickData(
             symbol=req.symbol,
-            name=symbol_contract_map[req.symbol].name,
+            name=symbol_name_map.get(req.symbol, ""),
             exchange=Exchange.BINANCE,
             datetime=datetime.now(CHINA_TZ),
             gateway_name=self.gateway_name,
         )
         self.ticks[req.symbol.lower()] = tick
+
+        bar = BarData(
+            symbol=req.symbol,
+            exchange=Exchange.BINANCE,
+            datetime=datetime.now(CHINA_TZ),
+            gateway_name=self.gateway_name,
+            interval=Interval.MINUTE
+        )
+        self.bars[req.symbol.lower()] = bar
 
         # Close previous connection
         if self._active:
@@ -919,7 +1097,8 @@ class BinancesDataWebsocketApi(WebsocketClient):
         channels = []
         for ws_symbol in self.ticks.keys():
             channels.append(ws_symbol + "@ticker")
-            channels.append(ws_symbol + "@depth5")
+            channels.append(ws_symbol + "@kline_1m")
+            channels.append(ws_symbol + "@depth20")
 
         if self.server == "REAL":
             url = F_WEBSOCKET_DATA_HOST + "/".join(channels)
@@ -948,21 +1127,40 @@ class BinancesDataWebsocketApi(WebsocketClient):
             tick.low_price = float(data['l'])
             tick.last_price = float(data['c'])
             tick.datetime = datetime.fromtimestamp(float(data['E']) / 1000)
+
+            if tick.last_price:
+                last_price_map[symbol.upper()] = tick.last_price
+                self.gateway.on_tick(copy(tick))
+        elif channel == "kline_1m":
+            bar = self.bars[symbol]
+            kline = data['k']
+            bar.volume = float(kline['v'])
+            bar.open_price = float(kline['o'])
+            bar.close_price = float(kline['c'])
+            bar.high_price = float(kline['h'])
+            bar.low_price = float(kline['l'])
+            bar.open_interest = float(kline['n'])
+            bar.datetime = datetime.fromtimestamp(float(kline['t']) / 1000)
+
+            if kline['x']:
+                self.gateway.on_bar(copy(bar))
         else:
             bids = data["b"]
-            for n in range(min(5, len(bids))):
+            for n in range(5):
                 price, volume = bids[n]
                 tick.__setattr__("bid_price_" + str(n + 1), float(price))
                 tick.__setattr__("bid_volume_" + str(n + 1), float(volume))
 
             asks = data["a"]
-            for n in range(min(5, len(asks))):
+            for n in range(5):
                 price, volume = asks[n]
                 tick.__setattr__("ask_price_" + str(n + 1), float(price))
                 tick.__setattr__("ask_volume_" + str(n + 1), float(volume))
 
-        if tick.last_price:
-            self.gateway.on_tick(copy(tick))
+            tick.datetime = datetime.fromtimestamp(float(data['E']) / 1000)
+
+            if tick.last_price:
+                self.gateway.on_tick(copy(tick))
 
 
 def generate_datetime(timestamp: float) -> datetime:

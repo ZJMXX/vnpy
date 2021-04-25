@@ -157,3 +157,18 @@ class Interval(Enum):
     DAILY = "d"
     WEEKLY = "w"
     TICK = "tick"
+
+
+class BinanceContractType(Enum):
+    """
+    币安合约类型
+    """
+    PERPETUAL = "永续合约"
+    CURRENT_MONTH = "当月交割合约"
+    NEXT_MONTH = "次月交割合约"
+    CURRENT_QUARTER = "当季合约"
+    NEXT_QUARTER = "次季合约"
+    CURRENT_QUARTER_DELIVERING = "当季交割中的无效类型"
+    NEXT_QUARTER_DELIVERING = "次季交割中的无效类型"
+    CURRENT_MONTH_DELIVERING = "当月交割中的无效类型"
+    NEXT_MONTH_DELIVERING = "次月交割中的无效类型"

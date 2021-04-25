@@ -5,11 +5,12 @@ import os
 import traceback
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 from copy import copy
 from tzlocal import get_localzone
+from functools import lru_cache
 
 from vnpy.event import Event, EventEngine
 from vnpy.trader.engine import BaseEngine, MainEngine
@@ -538,6 +539,17 @@ class CtaEngine(BaseEngine):
         else:
             return None
 
+    def get_margin_rate(self, strategy: CtaTemplate):
+        """
+        返回保证金比率.
+        """
+        contract = self.get_contract(strategy.vt_symbol)
+
+        if contract:
+            return contract.margin_rate
+        else:
+            return None
+
     def get_account(self, vt_accountid: str = ""):
         """
         查询账号的资金
@@ -552,6 +564,29 @@ class CtaEngine(BaseEngine):
                 return {'balance': account.balance, 'available': account.available, 'postion_ratio': round(account.frozen * 100 / (account.balance + 0.01), 2)}
             else:
                 return {'balance': 0, 'available': 0, 'postion_ratio': 0}
+
+    @lru_cache()
+    def get_contract(self, vt_symbol: str) -> Optional[ContractData]:
+        """
+        Get contract data by vt_symbol.
+        """
+        return self.main_engine.get_contract(vt_symbol)
+
+    def subscribe(self, vt_symbol: str, strategy: CtaTemplate):
+        """
+        Subscribe market data
+        """
+        contract = self.get_contract(vt_symbol)
+        if contract:
+            req = SubscribeRequest(
+                symbol=contract.symbol, exchange=contract.exchange)
+            self.main_engine.subscribe(req, contract.gateway_name)
+
+            strategys = self.symbol_strategy_map[vt_symbol]
+            if strategy not in strategys:
+                strategys.append(strategy)
+        else:
+            self.write_log(f"行情订阅失败，找不到合约{strategy.vt_symbol}", strategy)
 
     def load_bar(
         self,

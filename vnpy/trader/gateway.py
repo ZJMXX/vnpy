@@ -9,6 +9,7 @@ from copy import copy
 from vnpy.event import Event, EventEngine
 from .event import (
     EVENT_TICK,
+    EVENT_BAR,
     EVENT_ORDER,
     EVENT_TRADE,
     EVENT_POSITION,
@@ -102,6 +103,13 @@ class BaseGateway(ABC):
         """
         self.on_event(EVENT_TICK, tick)
         self.on_event(EVENT_TICK + tick.vt_symbol, tick)
+
+    def on_bar(self, bar: BarData) -> None:
+        """
+        Tick event push.
+        Tick event of a specific vt_symbol is also pushed.
+        """
+        self.on_event(EVENT_BAR, bar)
 
     def on_trade(self, trade: TradeData) -> None:
         """
