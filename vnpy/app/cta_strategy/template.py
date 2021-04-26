@@ -1,10 +1,11 @@
 """"""
 from abc import ABC
 from copy import copy
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from vnpy.trader.constant import Interval, Direction, Offset, OrderType
 from vnpy.trader.object import BarData, TickData, OrderData, TradeData
+from vnpy.trader.converter import PositionHolding
 from vnpy.trader.utility import virtual
 
 from .base import StopOrder, EngineType
@@ -235,6 +236,10 @@ class CtaTemplate(ABC):
         查询账号的资金
         """
         return self.cta_engine.get_account(vt_accountid)
+
+    def get_position_detail(self, vt_symbol: str) -> Optional[PositionHolding]:
+        """"""
+        return self.cta_engine.get_position_detail(vt_symbol)
 
     def load_bar(
         self,

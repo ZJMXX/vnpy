@@ -130,10 +130,16 @@ class PositionHolding:
             self.long_pos = position.volume
             self.long_yd = position.yd_volume
             self.long_td = self.long_pos - self.long_yd
+            self.long_pnl = position.pnl
+            self.long_price = position.price
+            self.long_pos_frozen = position.frozen
         else:
             self.short_pos = position.volume
             self.short_yd = position.yd_volume
             self.short_td = self.short_pos - self.short_yd
+            self.short_pnl = position.pnl
+            self.short_price = position.price
+            self.short_pos_frozen = position.frozen
 
     def update_order(self, order: OrderData) -> None:
         """"""
