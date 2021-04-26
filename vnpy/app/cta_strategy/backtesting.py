@@ -148,6 +148,14 @@ class BacktestingEngine:
 
         self.logs = []
 
+        # 持仓盁亏初始化
+        self.long_avg_cost = 0  # 多头持仓均价
+        self.short_avg_cost = 0  # 空头持仓均价
+        self.long_pos = 0  # 多头仓位
+        self.short_pos = 0  # 空头仓位
+        self.long_profit_total = 0  # 多头总盈亏
+        self.short_profit_total = 0  # 空头总盈亏
+
         self.daily_results = {}
         self.daily_df = None
 
@@ -182,7 +190,7 @@ class BacktestingEngine:
         """
         返回账号的实时权益，可用资金，仓位比例,投资仓位比例上限
         """
-        return {'balance': self.capital, 'available': self.capital, 'postion_ratio': 0}
+        return {'balance': self.strategy.balance, 'available': self.capital, 'postion_ratio': 0}
 
     def set_parameters(
         self,
@@ -226,6 +234,21 @@ class BacktestingEngine:
         self.strategy = strategy_class(
             self, strategy_class.__name__, self.vt_symbol, setting
         )
+        # 初始化策略盈亏参数
+        self.strategy.capital = 0  # 初始资金
+        self.strategy.balance = self.capital  # 总资金
+        self.strategy.long_pos = 0  # 多头仓位
+        self.strategy.short_pos = 0  # 空头仓位
+        self.strategy.long_profit = 0  # 多头收益
+        self.strategy.short_profit = 0  # 空头收益
+        self.strategy.size = self.size  # 每手乘数
+        self.strategy.price_tick = self.pricetick  # 最小价格变动
+        self.strategy.active_limit_orders = self.active_limit_orders  # 未成交限价单
+        self.strategy.active_stop_orders = self.active_stop_orders  # 未成交停止单
+        if setting:
+            unactive_param = [loss_param for loss_param in list(setting.keys()) if
+                              loss_param not in self.strategy.parameters]
+            assert not unactive_param, f"不在策略参数列表内的回测参数:{unactive_param}"
 
     def load_data(self):
         """"""
@@ -804,6 +827,7 @@ class BacktestingEngine:
         self.cross_limit_order()
         self.cross_stop_order()
         self.strategy.on_bar(bar)
+        self.update_postion()  # 更新持仓数据
 
         self.update_daily_close(bar.close_price)
 
@@ -816,6 +840,7 @@ class BacktestingEngine:
         self.cross_limit_order()
         self.cross_stop_order()
         self.strategy.on_tick(tick)
+        self.update_postion()  # 更新持仓数据
 
         self.update_daily_close(tick.last_price)
 
@@ -874,6 +899,8 @@ class BacktestingEngine:
             self.strategy.on_trade(trade)
 
             self.trades[trade.vt_tradeid] = trade
+            # 更新持仓数据
+            self.update_postion(trade=trade)
 
     def cross_limit_order(self):
         """
@@ -898,15 +925,15 @@ class BacktestingEngine:
 
             # Check whether limit orders can be filled.
             long_cross = (
-                order.direction == Direction.LONG
-                and order.price >= long_cross_price
-                and long_cross_price > 0
+                    order.direction == Direction.LONG
+                    and order.price >= long_cross_price
+                    and long_cross_price > 0
             )
 
             short_cross = (
-                order.direction == Direction.SHORT
-                and order.price <= short_cross_price
-                and short_cross_price > 0
+                    order.direction == Direction.SHORT
+                    and order.price <= short_cross_price
+                    and short_cross_price > 0
             )
 
             if not long_cross and not short_cross:
@@ -946,6 +973,8 @@ class BacktestingEngine:
             self.strategy.on_trade(trade)
 
             self.trades[trade.vt_tradeid] = trade
+            # 更新持仓数据
+            self.update_postion(trade=trade)
 
     def cross_stop_order(self):
         """
@@ -1034,6 +1063,52 @@ class BacktestingEngine:
 
             self.strategy.pos += pos_change
             self.strategy.on_trade(trade)
+            # 更新持仓数据
+            self.update_postion(trade=trade)
+
+    def update_postion(self, trade=None):
+        """持仓监控"""
+        if trade:
+            if trade.direction == Direction.LONG:
+                # 做多单
+                if trade.offset == Offset.OPEN:
+                    long_cost = self.long_avg_cost * self.long_pos
+                    long_cost += trade.price * trade.volume
+                    # 平均成本
+                    self.long_pos += trade.volume
+                    if self.long_pos > 0:
+                        self.long_avg_cost = round(long_cost / float(self.long_pos), 3)
+
+                else:
+                    self.short_pos -= trade.volume
+            else:
+                # 做空单
+                if trade.offset == Offset.OPEN:
+                    short_cost = self.short_avg_cost * self.short_pos
+                    short_cost += trade.price * trade.volume
+                    # 平均成本
+                    self.short_pos += trade.volume
+                    if self.short_pos > 0:
+                        self.short_avg_cost = round(short_cost / float(self.short_pos), 3)
+                else:
+                    self.long_pos -= trade.volume
+        # 多/空仓收益
+        if self.mode == BacktestingMode.BAR:
+            last_price = self.bar.close_price
+        else:
+            last_price = self.tick.last_price
+        long_profit = (last_price - self.long_avg_cost) * self.long_pos * self.size
+        short_profit = (self.short_avg_cost - last_price) * self.short_pos * self.size
+        if trade:
+            if trade.direction == Direction.LONG:
+                self.long_profit_total += long_profit
+            if trade.direction == Direction.SHORT:
+                self.short_profit_total += short_profit
+        self.strategy.long_pos = self.long_pos
+        self.strategy.short_pos = self.short_pos
+        self.strategy.long_profit = long_profit
+        self.strategy.short_profit = short_profit
+        self.strategy.balance = self.capital + self.long_profit_total + self.short_profit_total
 
     def load_bar(
         self,
