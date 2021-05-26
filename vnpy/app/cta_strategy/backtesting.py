@@ -450,7 +450,7 @@ class BacktestingEngine:
             df["balance"] = df["net_pnl"].cumsum() + self.capital
 
             # When balance falls below 0, set daily return to 0
-            x = df["balance"] / df["balance"].shift(1)
+            x = (df["balance"] - df["balance"].shift(1)) / abs(df["balance"].shift(1))
             x[x <= 0] = np.nan
             df["return"] = np.log(x).fillna(0)
 
