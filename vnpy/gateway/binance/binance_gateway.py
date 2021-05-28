@@ -595,6 +595,7 @@ class BinanceRestApi(RestClient):
                 begin = buf[0].datetime
                 end = buf[-1].datetime
                 msg = f"获取历史数据成功，{req.symbol} - {req.interval.value}，{begin} - {end}"
+                print(msg)
                 self.gateway.write_log(msg)
 
                 # Break if total data count less than limit (latest date collected)
