@@ -25,7 +25,7 @@ from vnpy.trader.ui import MainWindow, create_qapp
 # from vnpy.gateway.tap import TapGateway
 # from vnpy.gateway.da import DaGateway
 # from vnpy.gateway.mt5 import Mt5Gateway
-# from vnpy.gateway.binance import BinanceGateway
+from vnpy.gateway.binance import BinanceGateway
 from vnpy.gateway.binances import BinancesGateway
 # from vnpy.gateway.huobi import HuobiGateway
 # from vnpy.gateway.huobif import HuobifGateway
@@ -62,6 +62,8 @@ from vnpy.app.data_manager import DataManagerApp
 from vnpy.app.data_recorder import DataRecorderApp
 from vnpy.app.risk_manager import RiskManagerApp
 from vnpy.app.portfolio_manager import PortfolioManagerApp
+
+
 # from vnpy.app.paper_account import PaperAccountApp
 
 
@@ -94,7 +96,7 @@ def main():
     # main_engine.add_gateway(TapGateway)
     # main_engine.add_gateway(DaGateway)
     # main_engine.add_gateway(Mt5Gateway)
-    # main_engine.add_gateway(BinanceGateway)
+    main_engine.add_gateway(BinanceGateway)
     main_engine.add_gateway(BinancesGateway)
     # main_engine.add_gateway(HuobiGateway)
     # main_engine.add_gateway(HuobifGateway)
@@ -133,8 +135,6 @@ def main():
     main_engine.add_app(PortfolioManagerApp)
     # main_engine.add_app(PaperAccountApp)
 
-
-    
     main_window = MainWindow(main_engine, event_engine)
     main_window.showMaximized()
 
