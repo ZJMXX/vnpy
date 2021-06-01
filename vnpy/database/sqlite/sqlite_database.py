@@ -152,7 +152,7 @@ class SqliteDatabase(BaseDatabase):
 
         # Upsert data into database
         with self.db.atomic():
-            for c in chunked(data, 50):
+            for c in chunked(data, 5000):
                 DbBarData.insert_many(c).on_conflict_replace().execute()
 
         # Update bar overview
