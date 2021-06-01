@@ -9,6 +9,7 @@ import random
 import traceback
 
 import numpy as np
+import pandas as pd
 from pandas import DataFrame
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -44,6 +45,7 @@ class OptimizationSetting:
     def __init__(self):
         """"""
         self.params = {}
+        self.params_df = pd.DataFrame()
         self.target_name = ""
 
     def add_parameter(
@@ -71,20 +73,26 @@ class OptimizationSetting:
 
         self.params[name] = value_list
 
+    def add_parameter_df(self, df):
+        self.params_df = df
+
     def set_target(self, target_name: str):
         """"""
         self.target_name = target_name
 
     def generate_setting(self):
         """"""
-        keys = self.params.keys()
-        values = self.params.values()
-        products = list(product(*values))
+        if not self.params_df.empty:
+            settings = self.params_df.to_dict('records')
+        else:
+            keys = self.params.keys()
+            values = self.params.values()
+            products = list(product(*values))
 
-        settings = []
-        for p in products:
-            setting = dict(zip(keys, p))
-            settings.append(setting)
+            settings = []
+            for p in products:
+                setting = dict(zip(keys, p))
+                settings.append(setting)
 
         return settings
 
@@ -93,7 +101,7 @@ class OptimizationSetting:
         settings_ga = []
         settings = self.generate_setting()
         for d in settings:
-            param = [tuple(i) for i in d.items()]
+            param = list(d.items())
             settings_ga.append(param)
         return settings_ga
 
